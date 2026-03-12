@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>P2P Mesh Test</title>
+  <title>P2P Mesh Test v0.5</title>
   <style>
     body {
       font-family: sans-serif;
@@ -11,8 +11,21 @@
       padding: 20px;
     }
     #container {
-      max-width: 600px;
+      max-width: 800px;
       margin: auto;
+      display: flex;
+      gap: 20px;
+    }
+    #left {
+      flex: 2;
+    }
+    #right {
+      flex: 1;
+      background: #1a1a1a;
+      padding: 10px;
+      border: 1px solid #333;
+      height: 500px;
+      overflow-y: auto;
     }
     input, button {
       padding: 8px;
@@ -28,36 +41,80 @@
       margin-top: 10px;
       white-space: pre-wrap;
     }
+    .peer {
+      padding: 6px;
+      margin: 4px 0;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      cursor: default;
+      font-family: monospace;
+    }
   </style>
 </head>
 <body>
-<div id="container">
-  <h2>P2P Mesh Client</h2>
 
-  <div>
-    <strong>Your Peer ID:</strong>
-    <div id="selfId" style="font-family: monospace; margin: 6px 0;"></div>
+<div id="container">
+
+  <!-- LEFT SIDE -->
+  <div id="left">
+    <h2>P2P Mesh Client</h2>
+
+    <div>
+      <strong>Your Peer ID:</strong>
+      <div id="selfId" style="font-family: monospace; margin: 6px 0;"></div>
+
+      <strong>Your Short Name:</strong>
+      <div id="selfShort" style="font-family: monospace; margin: 6px 0;"></div>
+    </div>
+
+    <hr>
+
+    <h3>Connect to Peer</h3>
+    <input id="peerInput" placeholder="Enter peer ID" style="width: 100%;" />
+    <button id="connectBtn">Connect</button>
+
+    <hr>
+
+    <h3>Messages</h3>
+    <div id="log"></div>
+
+    <input id="msgInput" placeholder="Type message…" style="width: 80%;" />
+    <button id="sendBtn">Send</button>
   </div>
 
-  <hr>
+  <!-- RIGHT SIDE: PEER LIST -->
+  <div id="right">
+    <h3>Connected Peers</h3>
+    <div id="peerList"></div>
+  </div>
 
-  <h3>Connect to Peer</h3>
-  <input id="peerInput" placeholder="Enter peer ID" style="width: 100%;" />
-  <button id="connectBtn">Connect</button>
-
-  <hr>
-
-  <h3>Messages</h3>
-  <div id="log"></div>
-
-  <input id="msgInput" placeholder="Type message…" style="width: 80%;" />
-  <button id="sendBtn">Send</button>
 </div>
 
 <script src="https://cdn.jsdelivr.net/gh/redx-00/RoosterMesh/client.js"></script>
 <script>
-  // Display your own ID
+  // --- Persistent self ID ---
+  let storedId = localStorage.getItem("peerId");
+  if (!storedId) {
+    storedId = mesh.selfId; // first-time generation from client.js
+    localStorage.setItem("peerId", storedId);
+  }
+  mesh.selfId = storedId;
+
+  // --- Base36 short-name generator (4 letters) ---
+  function compressId(hexId) {
+    const clean = hexId.replace(/^0x/, "").replace(/-/g, "");
+    const n = BigInt("0x" + clean);
+    return n.toString(36);
+  }
+
+  function shortName(hexId) {
+    return compressId(hexId).slice(0, 4);
+  }
+
+  // Display your own ID + short name
+  const myShort = shortName(mesh.selfId);
   document.getElementById("selfId").textContent = mesh.selfId;
+  document.getElementById("selfShort").textContent = myShort;
 
   const log = (msg) => {
     const box = document.getElementById("log");
@@ -69,7 +126,8 @@
   document.getElementById("connectBtn").onclick = () => {
     const peerId = document.getElementById("peerInput").value.trim();
     if (!peerId) return;
-    log("Connecting to " + peerId + "…");
+
+    log("Connecting to " + shortName(peerId) + "…");
     mesh.connectToPeer(peerId);
   };
 
@@ -81,20 +139,36 @@
     for (const [peerId, entry] of mesh.peers.entries()) {
       if (entry.dc && entry.dc.readyState === "open") {
         entry.dc.send(msg);
-        log("You → " + peerId + ": " + msg);
+        log("You → " + shortName(peerId) + ": " + msg);
       }
     }
   };
 
-  // Patch the client’s onmessage handler to log messages
-  const origMap = mesh.peers;
-  const handler = setInterval(() => {
-    for (const [peerId, entry] of origMap.entries()) {
+  // Update peer list panel
+  function updatePeerList() {
+    const list = document.getElementById("peerList");
+    list.innerHTML = "";
+
+    for (const [peerId, entry] of mesh.peers.entries()) {
+      const div = document.createElement("div");
+      div.className = "peer";
+      div.textContent = shortName(peerId);
+      div.title = peerId; // hover shows full ID
+      list.appendChild(div);
+    }
+  }
+
+  // Patch message handlers + update peer list
+  setInterval(() => {
+    for (const [peerId, entry] of mesh.peers.entries()) {
       if (entry.dc && !entry._patched) {
         entry._patched = true;
+
         entry.dc.onmessage = (e) => {
-          log(peerId + " → You: " + e.data);
+          log(shortName(peerId) + " → You: " + e.data);
         };
+
+        updatePeerList();
       }
     }
   }, 500);
